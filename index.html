@@ -42,7 +42,7 @@
   }
   .iconbtn:active{transform:scale(.94);}
   .backbtn{background:none; border:none; color:var(--accent); font-size:16px; padding:6px 4px 6px 0; cursor:pointer; display:flex; align-items:center; gap:4px; flex-shrink:0;}
-  .content{padding:14px 16px 40px 16px; max-width:640px; margin:0 auto;}
+  .content{padding:14px 16px 40px 16px;}
   .header-row{
     display:flex; align-items:stretch; gap:6px; position:sticky; top:50px; z-index:15;
     background:var(--bg); padding:6px 0 10px 0; margin-bottom:6px;
@@ -151,6 +151,7 @@
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:26px 10px;}
   .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
   .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y:auto; }
+  @media (min-width: 720px){ .modal-sheet{ max-width:640px; border-radius:18px; margin-bottom:24px; } }
   .modal-sheet h3{margin:0 0 12px 0; font-size:17px;}
   .modal-close{float:right; background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer;}
   .code-group{margin-bottom:14px;}
