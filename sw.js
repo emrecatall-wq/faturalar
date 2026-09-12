@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bina-faturalari-cache-v1';
+const CACHE_NAME = 'bina-faturalari-cache-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
