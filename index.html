@@ -42,7 +42,14 @@
   }
   .iconbtn:active{transform:scale(.94);}
   .backbtn{background:none; border:none; color:var(--accent); font-size:16px; padding:6px 4px 6px 0; cursor:pointer; display:flex; align-items:center; gap:4px; flex-shrink:0;}
-  .content{padding:14px 16px 40px 16px;}
+  .content{padding:14px 16px 40px 16px; max-width:640px; margin:0 auto;}
+  @media (min-width: 720px){
+    .content{max-width:900px;}
+  }
+  @media (min-width: 1100px){
+    .content{max-width:1180px;}
+    body{font-size:15px;}
+  }
   .header-row{
     display:flex; align-items:stretch; gap:6px; position:sticky; top:50px; z-index:15;
     background:var(--bg); padding:6px 0 10px 0; margin-bottom:6px;
@@ -171,7 +178,7 @@
 <div id="app"></div>
 
 <script>
-const STORAGE_KEY = 'binaFaturalari_v4';
+const STORAGE_KEY = 'binaFaturalari_v3';
 
 // ==================================================================================
 // FIREBASE BULUT EŞİTLEME AYARLARI
@@ -405,6 +412,60 @@ function readExcelFile(file, callback){
   reader.readAsArrayBuffer(file);
 }
 
+function exportDaireRaporuExcel(aySayisi) {
+  if (typeof XLSX === 'undefined') { alert('Excel motoru yüklenemedi.'); return; }
+
+  const aoa = []; 
+  const merges = []; 
+
+  const row1 = ['Daire Adı'];
+  const row2 = [''];
+
+  const aylar = [];
+  let mKey = state.currentMonth;
+
+  for (let i = 0; i < aySayisi; i++) {
+    aylar.push(mKey);
+    const ayIsmi = monthLabel(mKey);
+    
+    row1.push(ayIsmi, '', '');
+    row2.push('Elektrik', 'Su', 'Doğalgaz');
+
+    const cStart = 1 + (i * 3);
+    merges.push({ s: { r: 0, c: cStart }, e: { r: 0, c: cStart + 2 } });
+
+    mKey = shiftMonth(mKey, -1);
+  }
+
+  aoa.push(row1, row2);
+
+  for (let i = 1; i <= 7; i++) {
+    const apt = state.apartments[i];
+    if (!apt) continue;
+    
+    const dataRow = [apt.name];
+
+    aylar.forEach(ay => {
+      const resE = getDaireKalemVal(i, 'elektrik', ay);
+      const resS = getDaireKalemVal(i, 'su', ay);
+      const resD = getDaireKalemVal(i, 'dogalgaz', ay);
+
+      dataRow.push(resE ? resE.tutar + ' ₺' : '?');
+      dataRow.push(resS ? resS.tutar + ' ₺' : '?');
+      dataRow.push(resD ? resD.tutar + ' ₺' : '?');
+    });
+
+    aoa.push(dataRow);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = merges;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Aylık Özet");
+  XLSX.writeFile(wb, "Daire-Aylik-Ozet-Raporu.xlsx");
+}
+
 function splitKodlar(raw){
   return String(raw||'').split(',').map(s => s.trim()).filter(Boolean);
 }
@@ -492,7 +553,6 @@ function getValForCodes(codes, monthKey){
   return null;
 }
 
-// YENİLENMİŞ KART ÖZET FONKSİYONU
 function getKartAylikOzet(kartObj, monthKey){
   if(!kartObj || !kartObj.ad) return null;
   const normKart = normalizeTr(kartObj.ad);
@@ -500,18 +560,15 @@ function getKartAylikOzet(kartObj, monthKey){
   
   let [y, m] = monthKey.split('-').map(Number);
   
-  // 1. Ekstre Sınırı: Bu ayın kesim tarihi (Örn: 30 Eylül)
   const seciliDonemKesimTarihi = new Date(y, m - 1, kesimGunu, 23, 59, 59);
-  
-  // 2. Ödemeler İçin Sınır: Kesim tarihinden itibaren 20 gün sonrası (kesim sonrası yapılan ödeme bu ekstreden düşülür)
   const ODEME_PENCERESI_GUN = 10;
   const odemeSonTarihi = new Date(seciliDonemKesimTarihi);
   odemeSonTarihi.setDate(odemeSonTarihi.getDate() + ODEME_PENCERESI_GUN);
 
   const allKartPayments = state.kartPayments.filter(p => normalizeTr(p.kartAdi||'') === normKart);
 
-  let ekstreToplami = 0;   // Sadece döneme ait ekstre (Taksitler hariç)
-  let kumulatifToplam = 0; // Tüm zamanların toplam borcu (Gelecek taksitler dahil)
+  let ekstreToplami = 0;   
+  let kumulatifToplam = 0; 
   let hasCurrentPeriodActivity = false;
   
   let prevM = m - 1; let prevY = y;
@@ -525,10 +582,8 @@ function getKartAylikOzet(kartObj, monthKey){
     const [py, pm, pd] = pDateStr.split('-').map(Number);
     const islemTarihi = new Date(py, pm - 1, pd, 12, 0, 0); 
     
-    // KÜMÜLATİF HESAPLAMA (Tüm zamanlar, limitsiz)
     kumulatifToplam += p.tutar;
     
-    // EKSTRE HESAPLAMASI
     if (p.tutar > 0) {
        if(islemTarihi <= seciliDonemKesimTarihi){
           ekstreToplami += p.tutar;
@@ -889,7 +944,6 @@ function renderAna(){
   }
   digerWrap.addEventListener('click', e => { if(e.target.closest('.grup-cell')) openDigerModal(render); });
 
-  // YENİ KARTLAR TABLOSU ARAYÜZÜ (Görsele göre revize edildi)
   const kartWrap = el(`<div class="ledger-wrap">
     <table class="ledger kart-ledger">
       <thead>
@@ -1230,6 +1284,75 @@ function renderAyarlar(){
     });
     e.target.value = '';
   });
+
+  // YENİ EKLENEN FATURA HAREKETLERİ KISMI
+  const faturaSec = el(`<div class="settings-section">
+    <h4>Fatura Hareketleri (Excel)</h4>
+    <div class="hint" style="margin-bottom:10px;">Tüm fatura ve ödeme hareketlerinizi (Ödeme sayfasındaki veriler) Excel dosyası olarak dışa aktarabilir veya mevcut listenin üzerine toplu olarak Excel'den veri içe aktarabilirsiniz.</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn secondary" id="faturaExportBtn">Excel Olarak Dışa Aktar</button>
+      <label class="btn secondary filebtn" id="faturaImportLabel" style="cursor:pointer;">Excel Yükle
+        <input type="file" accept=".xlsx,.xls" id="faturaImportFile" style="display:none;">
+      </label>
+    </div>
+  </div>`);
+  content.appendChild(faturaSec);
+
+  faturaSec.querySelector('#faturaExportBtn').onclick = () => {
+    if(state.payments.length === 0){ alert('Aktarılacak fatura hareketi yok.'); return; }
+    const rows = state.payments.map(p => ({
+      Tarih: p.tarih,
+      Açıklama: p.aciklama,
+      Tutar: p.tutar || 0
+    }));
+    exportRowsToExcel(rows, 'Fatura Hareketleri', 'fatura-hareketleri.xlsx');
+  };
+
+  faturaSec.querySelector('#faturaImportFile').addEventListener('change', e => {
+    const file = e.target.files[0]; if(!file) return;
+    readExcelFile(file, rows => {
+      let eklenen = 0;
+      rows.forEach(r => {
+        const t = r.Tarih || r.tarih || '';
+        const a = r['Açıklama'] || r.Aciklama || r.aciklama || r['Aciklama'] || '';
+        const tut = r.Tutar !== undefined ? r.Tutar : (r.tutar !== undefined ? r.tutar : '');
+        
+        if(t !== '' || a !== '' || tut !== '') {
+          state.payments.push({
+            tarih: String(t),
+            aciklama: String(a),
+            tutar: parseTutar(tut)
+          });
+          eklenen++;
+        }
+      });
+      sortPaymentsByDate(state.payments);
+      save(); render();
+      alert(`${eklenen} adet fatura hareketi başarıyla eklendi.`);
+    });
+    e.target.value = '';
+  });
+
+  // BİR ÖNCEKİ MESAJDA ONAYLADIĞIN AYLIK ÖZET EXCEL KISMI
+  const raporSec = el(`<div class="settings-section">
+    <h4>Daire Ödeme Raporu (Aylık Özet)</h4>
+    <div class="hint" style="margin-bottom:10px;">Dairelerin hangi ayları ödeyip ödemediğini tek bir Excel dosyasında, aylara göre sütunlara ayrılmış şekilde görebilirsiniz.</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn success" id="aylikRaporBtn">Aylık Excel Raporu Al</button>
+    </div>
+  </div>`);
+  content.appendChild(raporSec);
+
+  raporSec.querySelector('#aylikRaporBtn').onclick = () => {
+    const cevap = prompt("İçinde bulunduğumuz aydan geriye dönük kaç aylık rapor almak istiyorsunuz? (Örn: 2, 3, 6)");
+    const aySayisi = parseInt(cevap, 10);
+    
+    if (!isNaN(aySayisi) && aySayisi > 0 && aySayisi <= 12) {
+      exportDaireRaporuExcel(aySayisi);
+    } else if (cevap !== null) {
+      alert("Lütfen 1 ile 12 arasında geçerli bir rakam girin.");
+    }
+  };
 
   dataSec.querySelector('#exportBtn').onclick = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
