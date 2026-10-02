@@ -159,7 +159,7 @@
   table.excel-table .delbtn{background:none; border:none; color:var(--muted); font-size:14px; cursor:pointer; padding:5px 0; width:100%;}
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:26px 10px;}
   .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
-  .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y-auto; }
+  .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y:auto; }
   @media (min-width: 720px){ .modal-sheet{ max-width:640px; border-radius:18px; margin-bottom:24px; } }
   .modal-sheet h3{margin:0 0 12px 0; font-size:17px;}
   .modal-close{float:right; background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer;}
@@ -176,8 +176,9 @@
   .apt-name-edit input { flex: 1; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px; font-size: 14px; font-weight: 600; }
 
   /* Geri Alma Seçim İtem Stilleri */
-  .import-batch-item { display: flex; align-items: center; justify-content: space-between; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
-  .import-batch-info { display: flex; flex-direction: column; gap: 2px; }
+  .import-batch-item { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+  .import-batch-item input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+  .import-batch-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
   .import-batch-date { font-size: 13px; font-weight: 700; color: var(--accent); }
   .import-batch-meta { font-size: 11px; color: var(--muted); }
 </style>
@@ -320,7 +321,7 @@ function parseFullDateKey(raw){
   return raw;
 }
 
-// YENİDEN ESKİYE (Sonsuz En Üstte Gösterim)
+// YENİDEN ESKİYE (En yeni üstte)
 function sortPaymentsByDate(paymentsArray) {
   if(!paymentsArray || !Array.isArray(paymentsArray)) return;
   paymentsArray.sort((a, b) => parseFullDateKey(b.tarih).localeCompare(parseFullDateKey(a.tarih)));
@@ -691,6 +692,7 @@ function shiftMonth(key, delta){
   return y + '-' + String(m).padStart(2,'0');
 }
 
+// GERİ ALMA POPUP / SEÇİM MODALI
 function openUndoBatchModal(type, onUndoComplete){
   const isKart = type === 'kart';
   const batches = isKart ? (state.importBatchesKart || []) : (state.importBatchesPayments || []);
@@ -699,8 +701,9 @@ function openUndoBatchModal(type, onUndoComplete){
   const sheet = el(`<div class="modal-sheet">
     <button class="modal-close">✕</button>
     <h3>Yapıştırma Geçmişi (Geri Al)</h3>
-    <div class="hint" style="margin-bottom:14px;">Geri almak istediğiniz yapıştırma grubunun yanındaki <b>"Bu Yapıştırmayı Sil"</b> butonuna basarak o tarihteki tüm verileri temizleyebilirsiniz.</div>
+    <div class="hint" style="margin-bottom:14px;">Geri almak istediğiniz yapıştırma tarihlerini <b>işaretleyin</b> ve alttaki butona basarak o yapıştırmalara ait verileri silin.</div>
     <div id="batchList"></div>
+    <button class="btn danger" id="deleteSelectedBatchesBtn" style="width:100%; margin-top:14px;">Seçilen Yapıştırmaları Geri Al (Sil)</button>
   </div>`);
 
   const listEl = sheet.querySelector('#batchList');
@@ -708,41 +711,56 @@ function openUndoBatchModal(type, onUndoComplete){
   function renderBatchList(){
     listEl.innerHTML = '';
     if(batches.length === 0){
-      listEl.appendChild(el(`<div class="empty">Henüz yapıştırma geçmişi bulunmuyor.</div>`));
+      listEl.appendChild(el(`<div class="empty">Henüz kaydedilmiş bir yapıştırma geçmişi bulunmuyor.</div>`));
+      sheet.querySelector('#deleteSelectedBatchesBtn').style.display = 'none';
       return;
     }
 
     batches.slice().reverse().forEach((b) => {
-      const item = el(`<div class="import-batch-item">
+      const item = el(`<label class="import-batch-item">
+        <input type="checkbox" class="batch-chk" data-id="${b.id}">
         <div class="import-batch-info">
           <div class="import-batch-date">📅 ${escapeAttr(b.dateStr)}</div>
-          <div class="import-batch-meta">${b.ids.length} Adet Kayıt Yapıştırıldı</div>
+          <div class="import-batch-meta">${b.ids.length} Adet Kayıt İçeriyor</div>
         </div>
-        <button class="btn danger" style="padding:6px 10px; font-size:11px;">Bu Yapıştırmayı Sil</button>
-      </div>`);
-
-      item.querySelector('.btn.danger').onclick = () => {
-        if(confirm(`${b.dateStr} tarihinde yapıştırılan ${b.ids.length} adet kayıt silinecektir. Onaylıyor musunuz?`)){
-          const targetIds = new Set(b.ids);
-          if(isKart){
-            state.kartPayments = state.kartPayments.filter(p => !targetIds.has(p._importBatchId));
-            state.importBatchesKart = state.importBatchesKart.filter(x => x.id !== b.id);
-            sortPaymentsByDate(state.kartPayments);
-          } else {
-            state.payments = state.payments.filter(p => !targetIds.has(p._importBatchId));
-            state.importBatchesPayments = state.importBatchesPayments.filter(x => x.id !== b.id);
-            sortPaymentsByDate(state.payments);
-          }
-          save();
-          renderBatchList();
-          if(onUndoComplete) onUndoComplete();
-          alert('Seçilen yapıştırma grubu başarıyla geri alındı!');
-        }
-      };
+      </label>`);
 
       listEl.appendChild(item);
     });
   }
+
+  sheet.querySelector('#deleteSelectedBatchesBtn').onclick = () => {
+    const checkedInps = Array.from(listEl.querySelectorAll('.batch-chk:checked'));
+    if(checkedInps.length === 0){
+      alert('Lütfen geri almak istediğiniz en az bir yapıştırma tarihini işaretleyin.');
+      return;
+    }
+
+    const selectedBatchIds = checkedInps.map(inp => inp.dataset.id);
+    const selectedBatches = batches.filter(b => selectedBatchIds.includes(b.id));
+    
+    let totalRecordsCount = 0;
+    const targetBatchIdsSet = new Set(selectedBatchIds);
+    
+    selectedBatches.forEach(b => { totalRecordsCount += b.ids.length; });
+
+    if(confirm(`Seçtiğiniz ${selectedBatches.length} adet yapıştırma işlemine ait toplam ${totalRecordsCount} adet kayıt silinecektir. Onaylıyor musunuz?`)){
+      if(isKart){
+        state.kartPayments = state.kartPayments.filter(p => !targetBatchIdsSet.has(p._importBatchId));
+        state.importBatchesKart = state.importBatchesKart.filter(b => !targetBatchIdsSet.has(b.id));
+        sortPaymentsByDate(state.kartPayments);
+      } else {
+        state.payments = state.payments.filter(p => !targetBatchIdsSet.has(p._importBatchId));
+        state.importBatchesPayments = state.importBatchesPayments.filter(b => !targetBatchIdsSet.has(b.id));
+        sortPaymentsByDate(state.payments);
+      }
+      
+      save();
+      backdrop.remove();
+      if(onUndoComplete) onUndoComplete();
+      alert('Seçilen yapıştırma kayıtları başarıyla geri alındı!');
+    }
+  };
 
   renderBatchList();
   backdrop.appendChild(sheet);
@@ -1079,15 +1097,13 @@ function renderOdeme(){
   const wrap = el(`<div><div class="topbar"><button class="backbtn" id="backBtn">‹ Ana Sayfa</button></div><div class="content"></div></div>`);
   const content = wrap.querySelector('.content');
 
-  const hasBatches = (state.importBatchesPayments || []).length > 0;
-
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row"><h2 class="serif">Ödeme Veri Girişi (Daire & Diğer)</h2></div>
     <div class="excel-paste-wrap">
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar) verileri yapıştırın..."></textarea>
       <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">Verileri İşle ve Güncelle ✓</button>
-        <button class="btn warning" id="undoBtn" ${hasBatches ? '' : 'disabled'} title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
+        <button class="btn warning" id="undoBtn" title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1191,6 +1207,7 @@ function renderOdeme(){
     alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
   };
 
+  // TETİKLEYİCİ BUTON BAĞLANTISI
   stickyBlock.querySelector('#undoBtn').onclick = () => {
     openUndoBatchModal('payment', render);
   };
@@ -1209,8 +1226,6 @@ function renderKartlarSayfa(){
   const content = wrap.querySelector('.content');
   const kartOptions = () => state.kartlar.map(k => `<option value="${escapeAttr(k.ad)}">${escapeAttr(k.ad)}</option>`).join('');
 
-  const hasBatches = (state.importBatchesKart || []).length > 0;
-
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row">
       <h2 class="serif">Kart Havuzu</h2>
@@ -1220,7 +1235,7 @@ function renderKartlarSayfa(){
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar | Kart İsmi) yapıştırın..."></textarea>
       <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">İşle ve Güncelle ✓</button>
-        <button class="btn warning" id="undoBtn" ${hasBatches ? '' : 'disabled'} title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
+        <button class="btn warning" id="undoBtn" title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1338,6 +1353,7 @@ function renderKartlarSayfa(){
     alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
   };
 
+  // TETİKLEYİCİ BUTON BAĞLANTISI
   stickyBlock.querySelector('#undoBtn').onclick = () => {
     openUndoBatchModal('kart', render);
   };
