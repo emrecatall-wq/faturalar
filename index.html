@@ -159,7 +159,7 @@
   table.excel-table .delbtn{background:none; border:none; color:var(--muted); font-size:14px; cursor:pointer; padding:5px 0; width:100%;}
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:26px 10px;}
   .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
-  .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y:auto; }
+  .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y-auto; }
   @media (min-width: 720px){ .modal-sheet{ max-width:640px; border-radius:18px; margin-bottom:24px; } }
   .modal-sheet h3{margin:0 0 12px 0; font-size:17px;}
   .modal-close{float:right; background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer;}
@@ -174,6 +174,12 @@
   .color-picker-row input[type=color] { width: 36px; height: 32px; border: none; border-radius: 6px; background: none; cursor: pointer; }
   .apt-name-edit { display: flex; gap: 8px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
   .apt-name-edit input { flex: 1; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px; font-size: 14px; font-weight: 600; }
+
+  /* Geri Alma Seçim İtem Stilleri */
+  .import-batch-item { display: flex; align-items: center; justify-content: space-between; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .import-batch-info { display: flex; flex-direction: column; gap: 2px; }
+  .import-batch-date { font-size: 13px; font-weight: 700; color: var(--accent); }
+  .import-batch-meta { font-size: 11px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -226,8 +232,8 @@ function mergeLoadedState(parsed){
     digerKalemler: parsed.digerKalemler || [],
     kartlar: parsed.kartlar || [],
     kartPayments: parsed.kartPayments || [],
-    lastImportPaymentsBackup: parsed.lastImportPaymentsBackup || null,
-    lastImportKartPaymentsBackup: parsed.lastImportKartPaymentsBackup || null
+    importBatchesPayments: parsed.importBatchesPayments || [],
+    importBatchesKart: parsed.importBatchesKart || []
   });
   sortPaymentsByDate(loadedState.payments);
   sortPaymentsByDate(loadedState.kartPayments);
@@ -314,9 +320,10 @@ function parseFullDateKey(raw){
   return raw;
 }
 
+// YENİDEN ESKİYE (Sonsuz En Üstte Gösterim)
 function sortPaymentsByDate(paymentsArray) {
   if(!paymentsArray || !Array.isArray(paymentsArray)) return;
-  paymentsArray.sort((a, b) => parseFullDateKey(a.tarih).localeCompare(parseFullDateKey(b.tarih)));
+  paymentsArray.sort((a, b) => parseFullDateKey(b.tarih).localeCompare(parseFullDateKey(a.tarih)));
 }
 
 function nowMonthKey(){
@@ -329,7 +336,7 @@ function defaultState(){
   return {
     theme: 'koyu', customColor: '#c9803f', rowBgColor: '#1e252b', textColor: '#eef1f4', subtextColor: '#93a0a9',
     currentMonth: nowMonthKey(), apartments, payments: [], customTabs: [], digerKalemler: [], kartlar: [], kartPayments: [],
-    lastImportPaymentsBackup: null, lastImportKartPaymentsBackup: null
+    importBatchesPayments: [], importBatchesKart: []
   };
 }
 
@@ -349,8 +356,8 @@ function load(){
       digerKalemler: parsed.digerKalemler || [],
       kartlar: parsed.kartlar || [],
       kartPayments: parsed.kartPayments || [],
-      lastImportPaymentsBackup: parsed.lastImportPaymentsBackup || null,
-      lastImportKartPaymentsBackup: parsed.lastImportKartPaymentsBackup || null
+      importBatchesPayments: parsed.importBatchesPayments || [],
+      importBatchesKart: parsed.importBatchesKart || []
     });
     
     sortPaymentsByDate(loadedState.payments);
@@ -524,7 +531,7 @@ function normalizeTr(s){ return String(s||'').toLowerCase().replace(/ğ/g,'g').r
 function findPaymentForCodeInMonth(code, monthKey){
   if(!code) return null;
   const normCode = String(code).replace(/\s+/g,'').toLowerCase();
-  for(let i = state.payments.length - 1; i >= 0; i--){
+  for(let i = 0; i < state.payments.length; i++){
     const p = state.payments[i];
     const pMonth = parseAyKeyFromTarih(p.tarih);
     if(pMonth === monthKey && p.aciklama){
@@ -682,6 +689,66 @@ function shiftMonth(key, delta){
   while(m>12){m-=12; y++;}
   while(m<1){m+=12; y--;}
   return y + '-' + String(m).padStart(2,'0');
+}
+
+function openUndoBatchModal(type, onUndoComplete){
+  const isKart = type === 'kart';
+  const batches = isKart ? (state.importBatchesKart || []) : (state.importBatchesPayments || []);
+  
+  const backdrop = el(`<div class="modal-backdrop"></div>`);
+  const sheet = el(`<div class="modal-sheet">
+    <button class="modal-close">✕</button>
+    <h3>Yapıştırma Geçmişi (Geri Al)</h3>
+    <div class="hint" style="margin-bottom:14px;">Geri almak istediğiniz yapıştırma grubunun yanındaki <b>"Bu Yapıştırmayı Sil"</b> butonuna basarak o tarihteki tüm verileri temizleyebilirsiniz.</div>
+    <div id="batchList"></div>
+  </div>`);
+
+  const listEl = sheet.querySelector('#batchList');
+
+  function renderBatchList(){
+    listEl.innerHTML = '';
+    if(batches.length === 0){
+      listEl.appendChild(el(`<div class="empty">Henüz yapıştırma geçmişi bulunmuyor.</div>`));
+      return;
+    }
+
+    batches.slice().reverse().forEach((b) => {
+      const item = el(`<div class="import-batch-item">
+        <div class="import-batch-info">
+          <div class="import-batch-date">📅 ${escapeAttr(b.dateStr)}</div>
+          <div class="import-batch-meta">${b.ids.length} Adet Kayıt Yapıştırıldı</div>
+        </div>
+        <button class="btn danger" style="padding:6px 10px; font-size:11px;">Bu Yapıştırmayı Sil</button>
+      </div>`);
+
+      item.querySelector('.btn.danger').onclick = () => {
+        if(confirm(`${b.dateStr} tarihinde yapıştırılan ${b.ids.length} adet kayıt silinecektir. Onaylıyor musunuz?`)){
+          const targetIds = new Set(b.ids);
+          if(isKart){
+            state.kartPayments = state.kartPayments.filter(p => !targetIds.has(p._importBatchId));
+            state.importBatchesKart = state.importBatchesKart.filter(x => x.id !== b.id);
+            sortPaymentsByDate(state.kartPayments);
+          } else {
+            state.payments = state.payments.filter(p => !targetIds.has(p._importBatchId));
+            state.importBatchesPayments = state.importBatchesPayments.filter(x => x.id !== b.id);
+            sortPaymentsByDate(state.payments);
+          }
+          save();
+          renderBatchList();
+          if(onUndoComplete) onUndoComplete();
+          alert('Seçilen yapıştırma grubu başarıyla geri alındı!');
+        }
+      };
+
+      listEl.appendChild(item);
+    });
+  }
+
+  renderBatchList();
+  backdrop.appendChild(sheet);
+  backdrop.addEventListener('click', e => { if(e.target===backdrop) backdrop.remove(); });
+  sheet.querySelector('.modal-close').onclick = () => backdrop.remove();
+  document.body.appendChild(backdrop);
 }
 
 function openDigerModal(onChange){
@@ -1012,7 +1079,7 @@ function renderOdeme(){
   const wrap = el(`<div><div class="topbar"><button class="backbtn" id="backBtn">‹ Ana Sayfa</button></div><div class="content"></div></div>`);
   const content = wrap.querySelector('.content');
 
-  const hasUndo = Array.isArray(state.lastImportPaymentsBackup);
+  const hasBatches = (state.importBatchesPayments || []).length > 0;
 
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row"><h2 class="serif">Ödeme Veri Girişi (Daire & Diğer)</h2></div>
@@ -1020,7 +1087,7 @@ function renderOdeme(){
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar) verileri yapıştırın..."></textarea>
       <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">Verileri İşle ve Güncelle ✓</button>
-        <button class="btn warning" id="undoBtn" ${hasUndo ? '' : 'disabled'} title="Son yapıştırılan verileri geri alır">↩ Son Yapıştırmayı Geri Al</button>
+        <button class="btn warning" id="undoBtn" ${hasBatches ? '' : 'disabled'} title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1083,6 +1150,8 @@ function renderOdeme(){
     if(rows.length === 0){ alert('Geçerli veri okunamadı.'); return; }
 
     let duplicateCount = 0;
+    const batchId = 'p_batch_' + Date.now();
+    const insertedIds = [];
     const newItems = [];
 
     rows.forEach(r => {
@@ -1096,7 +1165,9 @@ function renderOdeme(){
       if(isDup){
         duplicateCount++;
       }
-      newItems.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar});
+      const itemId = 'p_item_' + Math.random().toString(36).substring(2, 9);
+      insertedIds.push(itemId);
+      newItems.push({_importBatchId: batchId, _itemId: itemId, tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar});
     });
 
     if(duplicateCount > 0){
@@ -1106,7 +1177,11 @@ function renderOdeme(){
       }
     }
 
-    state.lastImportPaymentsBackup = JSON.parse(JSON.stringify(state.payments));
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR') + ' ' + now.toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'});
+    
+    state.importBatchesPayments = state.importBatchesPayments || [];
+    state.importBatchesPayments.push({ id: batchId, dateStr: dateStr, ids: insertedIds });
 
     newItems.forEach(item => state.payments.push(item));
     sortPaymentsByDate(state.payments); 
@@ -1117,15 +1192,7 @@ function renderOdeme(){
   };
 
   stickyBlock.querySelector('#undoBtn').onclick = () => {
-    if(!state.lastImportPaymentsBackup){ alert('Geri alınacak son yapıştırma kaydı bulunamadı.'); return; }
-    if(confirm('Son yapıştırılan veriler listeden kaldırılacak. Onaylıyor musunuz?')){
-      state.payments = JSON.parse(JSON.stringify(state.lastImportPaymentsBackup));
-      state.lastImportPaymentsBackup = null;
-      sortPaymentsByDate(state.payments);
-      save();
-      render();
-      alert('Son yapıştırma işlemi başarıyla geri alındı!');
-    }
+    openUndoBatchModal('payment', render);
   };
 
   stickyBlock.querySelector('#excelExportBtn').onclick = () => {
@@ -1142,7 +1209,7 @@ function renderKartlarSayfa(){
   const content = wrap.querySelector('.content');
   const kartOptions = () => state.kartlar.map(k => `<option value="${escapeAttr(k.ad)}">${escapeAttr(k.ad)}</option>`).join('');
 
-  const hasUndo = Array.isArray(state.lastImportKartPaymentsBackup);
+  const hasBatches = (state.importBatchesKart || []).length > 0;
 
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row">
@@ -1153,7 +1220,7 @@ function renderKartlarSayfa(){
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar | Kart İsmi) yapıştırın..."></textarea>
       <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">İşle ve Güncelle ✓</button>
-        <button class="btn warning" id="undoBtn" ${hasUndo ? '' : 'disabled'} title="Son yapıştırılan kart verilerini geri alır">↩ Son Yapıştırmayı Geri Al</button>
+        <button class="btn warning" id="undoBtn" ${hasBatches ? '' : 'disabled'} title="Yapıştırma geçmişini gösterir ve seçerek geri almayı sağlar">↩ Geri Al (Yapıştırma Listesi)</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1227,6 +1294,8 @@ function renderKartlarSayfa(){
     const kartAdMap = {}; state.kartlar.forEach(k => { kartAdMap[normalizeTr(k.ad)] = k.ad; });
 
     let duplicateCount = 0;
+    const batchId = 'k_batch_' + Date.now();
+    const insertedIds = [];
     const newItems = [];
 
     rows.forEach(r => {
@@ -1243,7 +1312,9 @@ function renderKartlarSayfa(){
       if(isDup){
         duplicateCount++;
       }
-      newItems.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar, kartAdi: mappedKart});
+      const itemId = 'k_item_' + Math.random().toString(36).substring(2, 9);
+      insertedIds.push(itemId);
+      newItems.push({_importBatchId: batchId, _itemId: itemId, tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar, kartAdi: mappedKart});
     });
 
     if(duplicateCount > 0){
@@ -1253,7 +1324,11 @@ function renderKartlarSayfa(){
       }
     }
 
-    state.lastImportKartPaymentsBackup = JSON.parse(JSON.stringify(state.kartPayments));
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('tr-TR') + ' ' + now.toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'});
+    
+    state.importBatchesKart = state.importBatchesKart || [];
+    state.importBatchesKart.push({ id: batchId, dateStr: dateStr, ids: insertedIds });
 
     newItems.forEach(item => payments.push(item));
     sortPaymentsByDate(state.kartPayments); 
@@ -1264,15 +1339,7 @@ function renderKartlarSayfa(){
   };
 
   stickyBlock.querySelector('#undoBtn').onclick = () => {
-    if(!state.lastImportKartPaymentsBackup){ alert('Geri alınacak son yapıştırma kaydı bulunamadı.'); return; }
-    if(confirm('Son yapıştırılan kart verileri listeden kaldırılacak. Onaylıyor musunuz?')){
-      state.kartPayments = JSON.parse(JSON.stringify(state.lastImportKartPaymentsBackup));
-      state.lastImportKartPaymentsBackup = null;
-      sortPaymentsByDate(state.kartPayments);
-      save();
-      render();
-      alert('Son yapıştırma işlemi başarıyla geri alındı!');
-    }
+    openUndoBatchModal('kart', render);
   };
 
   stickyBlock.querySelector('#mkEkleBtn').onclick = () => {
