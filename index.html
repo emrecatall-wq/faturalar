@@ -489,19 +489,29 @@ function formatKisaTarih(raw){
   return raw.length > 10 ? raw.slice(0, 10) : raw;
 }
 
+// 5'İNDEN 5'İNE DÖNEM AY KEYI HESAPLAMA (Örn: 5 Ekim 2026 -> Eylül 2026 dönemi)
 function parseAyKeyFromTarih(raw){
   if(!raw) return null;
-  raw = String(raw).trim().toLowerCase();
-  if(raw === '') return null;
-  let m = raw.match(/^(\d{4})[-.\/](\d{1,2})/);
-  if(m) return m[1] + '-' + String(m[2]).padStart(2,'0');
-  m = raw.match(/^(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{2,4})/);
-  if(m){ let y = +m[3]; if(y < 100) y += 2000; return y + '-' + String(m[2]).padStart(2,'0'); }
-  m = raw.match(/^(\d{1,2})\s*[.\-\/]?\s*([a-zçğıöşü]+)\s*[.\-\/]?\s*(\d{4})/i);
-  if(m){ const ayNo = AY_ADI_MAP[m[2]]; if(ayNo) return m[3] + '-' + String(ayNo).padStart(2,'0'); }
-  m = raw.match(/^([a-zçğıöşü]+)\s+(\d{4})/i);
-  if(m){ const ayNo = AY_ADI_MAP[m[1]]; if(ayNo) return m[2] + '-' + String(ayNo).padStart(2,'0'); }
-  return null;
+  const fullDateStr = parseFullDateKey(raw);
+  if(!fullDateStr || fullDateStr === '9999-99-99') return null;
+  
+  const m = fullDateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) return null;
+  
+  let y = parseInt(m[1], 10);
+  let mo = parseInt(m[2], 10);
+  let d = parseInt(m[3], 10);
+  
+  // Ayın 1, 2, 3, 4 veya 5'i ise bir önceki ayın dönemine ait sayılır
+  if(d <= 5){
+    mo -= 1;
+    if(mo < 1){
+      mo = 12;
+      y -= 1;
+    }
+  }
+  
+  return y + '-' + String(mo).padStart(2, '0');
 }
 
 function parseImportBlock(text){
@@ -1207,7 +1217,6 @@ function renderOdeme(){
     alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
   };
 
-  // TETİKLEYİCİ BUTON BAĞLANTISI
   stickyBlock.querySelector('#undoBtn').onclick = () => {
     openUndoBatchModal('payment', render);
   };
@@ -1333,7 +1342,7 @@ function renderKartlarSayfa(){
     });
 
     if(duplicateCount > 0){
-      const confirmMsg = `⚠️ DİKKAT: Yapıştırmaya çalıştığınız kart verileri içinde ${duplicateCount} adet ZATEN VAR OLAN (Mükerrer) harcama bulundu!\n\nYine de bu verileri eklemek istiyor musunuz?`;
+      const confirmMsg = `⚠️️ DİKKAT: Yapıştırmaya çalıştığınız kart verileri içinde ${duplicateCount} adet ZATEN VAR OLAN (Mükerrer) harcama bulundu!\n\nYine de bu verileri eklemek istiyor musunuz?`;
       if(!confirm(confirmMsg)){
         return;
       }
@@ -1353,7 +1362,6 @@ function renderKartlarSayfa(){
     alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
   };
 
-  // TETİKLEYİCİ BUTON BAĞLANTISI
   stickyBlock.querySelector('#undoBtn').onclick = () => {
     openUndoBatchModal('kart', render);
   };
