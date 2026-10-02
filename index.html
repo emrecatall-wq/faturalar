@@ -127,10 +127,12 @@
   .excel-paste-wrap textarea { width: 100%; height: 70px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 12px; font-family: monospace; resize: vertical; }
   .btn{background:var(--accent); color:#fff; border:none; border-radius:10px; padding:8px 12px; font-size:12.5px; font-weight:600; cursor:pointer;}
   .btn.secondary{background:transparent; color:var(--accent); border:1px solid var(--accent);}
+  .btn.warning{background:#e67e22; color:#fff;}
   .btn.danger{background:var(--c-unpaid); color:#fff;}
   .btn.success{background:#2e7d32; color:#fff;}
   .btn:active{opacity:.85;}
-  .bulk-bar { display: flex; align-items: center; justify-content: space-between; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: 12px; }
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+  .bulk-bar { display: flex; align-items: center; justify-content: space-between; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: 12px; flex-wrap: wrap; gap: 6px; }
   .bulk-bar label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; }
   .excel-wrap{border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-top:2px;}
   table.excel-table{width:100%; border-collapse:collapse; table-layout:fixed;}
@@ -180,12 +182,7 @@
 <script>
 const STORAGE_KEY = 'binaFaturalari_v3';
 
-// ==================================================================================
-// FIREBASE BULUT EŞİTLEME AYARLARI
-// Kendi Firebase projenizin bilgilerini console.firebase.google.com üzerinden
-// (Proje Ayarları > Genel > "Web uygulaması" bölümünden) alıp aşağıya yapıştırın.
-// Doldurmazsanız uygulama sadece bu cihazda (localStorage) çalışmaya devam eder.
-// ==================================================================================
+// FIREBASE CONFIG
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBZ8wHGSq_dQWfV6VRvdWSo16wl9VlfI9M",
   authDomain: "faturalar-f0c05.firebaseapp.com",
@@ -194,7 +191,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "305847305937",
   appId: "1:305847305937:web:a1b8a65861a1df6d08e7f0"
 };
-const FIREBASE_DOC_PATH = ['binaFaturalari', 'veri']; // Firestore: koleksiyon/döküman
+const FIREBASE_DOC_PATH = ['binaFaturalari', 'veri'];
 let fbDb = null;
 let fbEnabled = false;
 let fbPushTimer = null;
@@ -228,7 +225,9 @@ function mergeLoadedState(parsed){
     customTabs: parsed.customTabs || [],
     digerKalemler: parsed.digerKalemler || [],
     kartlar: parsed.kartlar || [],
-    kartPayments: parsed.kartPayments || []
+    kartPayments: parsed.kartPayments || [],
+    lastImportPaymentsBackup: parsed.lastImportPaymentsBackup || null,
+    lastImportKartPaymentsBackup: parsed.lastImportKartPaymentsBackup || null
   });
   sortPaymentsByDate(loadedState.payments);
   sortPaymentsByDate(loadedState.kartPayments);
@@ -329,7 +328,8 @@ function defaultState(){
   for(let i=1;i<=7;i++){ apartments[i] = { name: i + '. Daire', codes: {elektrik:[], su:[], dogalgaz:[]} }; }
   return {
     theme: 'koyu', customColor: '#c9803f', rowBgColor: '#1e252b', textColor: '#eef1f4', subtextColor: '#93a0a9',
-    currentMonth: nowMonthKey(), apartments, payments: [], customTabs: [], digerKalemler: [], kartlar: [], kartPayments: []
+    currentMonth: nowMonthKey(), apartments, payments: [], customTabs: [], digerKalemler: [], kartlar: [], kartPayments: [],
+    lastImportPaymentsBackup: null, lastImportKartPaymentsBackup: null
   };
 }
 
@@ -348,7 +348,9 @@ function load(){
       customTabs: parsed.customTabs || [],
       digerKalemler: parsed.digerKalemler || [],
       kartlar: parsed.kartlar || [],
-      kartPayments: parsed.kartPayments || []
+      kartPayments: parsed.kartPayments || [],
+      lastImportPaymentsBackup: parsed.lastImportPaymentsBackup || null,
+      lastImportKartPaymentsBackup: parsed.lastImportKartPaymentsBackup || null
     });
     
     sortPaymentsByDate(loadedState.payments);
@@ -389,7 +391,6 @@ function parseTutar(raw){
 
 function formatTutar(v){ return (v||0).toLocaleString('tr-TR',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' \u20ba'; }
 
-// ---- Excel (SheetJS) Yardımcı Fonksiyonları ----
 function exportRowsToExcel(rows, sheetName, filename){
   if(typeof XLSX === 'undefined'){ alert('Excel motoru yüklenemedi. İnternet bağlantınızı kontrol edin.'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1011,12 +1012,15 @@ function renderOdeme(){
   const wrap = el(`<div><div class="topbar"><button class="backbtn" id="backBtn">‹ Ana Sayfa</button></div><div class="content"></div></div>`);
   const content = wrap.querySelector('.content');
 
+  const hasUndo = Array.isArray(state.lastImportPaymentsBackup);
+
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row"><h2 class="serif">Ödeme Veri Girişi (Daire & Diğer)</h2></div>
     <div class="excel-paste-wrap">
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar) verileri yapıştırın..."></textarea>
-      <div style="display:flex; gap:8px; margin-top:6px;">
+      <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">Verileri İşle ve Güncelle ✓</button>
+        <button class="btn warning" id="undoBtn" ${hasUndo ? '' : 'disabled'} title="Son yapıştırılan verileri geri alır">↩ Son Yapıştırmayı Geri Al</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1071,14 +1075,59 @@ function renderOdeme(){
 
   wrap.querySelector('#backBtn').onclick = () => { window.location.hash = ''; };
   wrap.querySelector('#clearPasteBtn').onclick = () => { wrap.querySelector('#pasteArea').value=''; };
+  
   wrap.querySelector('#processBtn').onclick = () => {
     const rawVal = wrap.querySelector('#pasteArea').value.trim();
     if(rawVal === ''){ alert('Veri girin.'); return; }
     const rows = parseImportBlock(rawVal);
-    rows.forEach(r => payments.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parseTutar(r.tutar)}));
+    if(rows.length === 0){ alert('Geçerli veri okunamadı.'); return; }
+
+    let duplicateCount = 0;
+    const newItems = [];
+
+    rows.forEach(r => {
+      const parsedTutar = parseTutar(r.tutar);
+      const isDup = state.payments.some(p => 
+        String(p.tarih).trim() === String(r.tarih).trim() &&
+        normalizeTr(p.aciklama) === normalizeTr(r.aciklama) &&
+        Math.abs((p.tutar || 0) - parsedTutar) < 0.01
+      );
+
+      if(isDup){
+        duplicateCount++;
+      }
+      newItems.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar});
+    });
+
+    if(duplicateCount > 0){
+      const confirmMsg = `⚠️ DİKKAT: Yapıştırmaya çalıştığınız veriler içinde ${duplicateCount} adet ZATEN VAR OLAN (Mükerrer) kayıt bulundu!\n\nYine de bu verileri eklemek istiyor musunuz?`;
+      if(!confirm(confirmMsg)){
+        return; 
+      }
+    }
+
+    state.lastImportPaymentsBackup = JSON.parse(JSON.stringify(state.payments));
+
+    newItems.forEach(item => state.payments.push(item));
     sortPaymentsByDate(state.payments); 
-    wrap.querySelector('#pasteArea').value = ''; save(); renderList(); alert(`${rows.length} satır işlendi.`);
+    wrap.querySelector('#pasteArea').value = ''; 
+    save(); 
+    render(); 
+    alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
   };
+
+  stickyBlock.querySelector('#undoBtn').onclick = () => {
+    if(!state.lastImportPaymentsBackup){ alert('Geri alınacak son yapıştırma kaydı bulunamadı.'); return; }
+    if(confirm('Son yapıştırılan veriler listeden kaldırılacak. Onaylıyor musunuz?')){
+      state.payments = JSON.parse(JSON.stringify(state.lastImportPaymentsBackup));
+      state.lastImportPaymentsBackup = null;
+      sortPaymentsByDate(state.payments);
+      save();
+      render();
+      alert('Son yapıştırma işlemi başarıyla geri alındı!');
+    }
+  };
+
   stickyBlock.querySelector('#excelExportBtn').onclick = () => {
     if(payments.length === 0){ alert('Aktarılacak veri yok.'); return; }
     const rows = payments.map(p => ({ Tarih: p.tarih, Açıklama: p.aciklama, Tutar: p.tutar||0 }));
@@ -1093,6 +1142,8 @@ function renderKartlarSayfa(){
   const content = wrap.querySelector('.content');
   const kartOptions = () => state.kartlar.map(k => `<option value="${escapeAttr(k.ad)}">${escapeAttr(k.ad)}</option>`).join('');
 
+  const hasUndo = Array.isArray(state.lastImportKartPaymentsBackup);
+
   const stickyBlock = el(`<div class="sticky-top-block">
     <div class="apt-title-row">
       <h2 class="serif">Kart Havuzu</h2>
@@ -1100,8 +1151,9 @@ function renderKartlarSayfa(){
     </div>
     <div class="excel-paste-wrap">
       <textarea id="pasteArea" placeholder="Excel'den (Tarih | Açıklama | Tutar | Kart İsmi) yapıştırın..."></textarea>
-      <div style="display:flex; gap:8px; margin-top:6px;">
+      <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
         <button class="btn success" id="processBtn" style="flex:1;">İşle ve Güncelle ✓</button>
+        <button class="btn warning" id="undoBtn" ${hasUndo ? '' : 'disabled'} title="Son yapıştırılan kart verilerini geri alır">↩ Son Yapıştırmayı Geri Al</button>
         <button class="btn secondary" id="clearPasteBtn">Temizle</button>
       </div>
     </div>
@@ -1170,12 +1222,57 @@ function renderKartlarSayfa(){
     if(rawVal === ''){ alert('Veri girin.'); return; }
     if(state.kartlar.length === 0){ alert('Önce Kart Ayarları kısmından kart ekleyin.'); return; }
     const rows = parseImportBlockKart(rawVal);
+    if(rows.length === 0){ alert('Geçerli veri okunamadı.'); return; }
+
     const kartAdMap = {}; state.kartlar.forEach(k => { kartAdMap[normalizeTr(k.ad)] = k.ad; });
-    rows.forEach(r => payments.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parseTutar(r.tutar), kartAdi: kartAdMap[normalizeTr(r.kartAdi)] || ''}));
-    
+
+    let duplicateCount = 0;
+    const newItems = [];
+
+    rows.forEach(r => {
+      const parsedTutar = parseTutar(r.tutar);
+      const mappedKart = kartAdMap[normalizeTr(r.kartAdi)] || '';
+      
+      const isDup = state.kartPayments.some(p => 
+        String(p.tarih).trim() === String(r.tarih).trim() &&
+        normalizeTr(p.aciklama) === normalizeTr(r.aciklama) &&
+        Math.abs((p.tutar || 0) - parsedTutar) < 0.01 &&
+        normalizeTr(p.kartAdi) === normalizeTr(mappedKart)
+      );
+
+      if(isDup){
+        duplicateCount++;
+      }
+      newItems.push({tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar, kartAdi: mappedKart});
+    });
+
+    if(duplicateCount > 0){
+      const confirmMsg = `⚠️ DİKKAT: Yapıştırmaya çalıştığınız kart verileri içinde ${duplicateCount} adet ZATEN VAR OLAN (Mükerrer) harcama bulundu!\n\nYine de bu verileri eklemek istiyor musunuz?`;
+      if(!confirm(confirmMsg)){
+        return;
+      }
+    }
+
+    state.lastImportKartPaymentsBackup = JSON.parse(JSON.stringify(state.kartPayments));
+
+    newItems.forEach(item => payments.push(item));
     sortPaymentsByDate(state.kartPayments); 
-    
-    wrap.querySelector('#pasteArea').value = ''; save(); renderList(); alert(`${rows.length} satır işlendi.`);
+    wrap.querySelector('#pasteArea').value = ''; 
+    save(); 
+    render(); 
+    alert(`${newItems.length} satır işlendi.` + (duplicateCount > 0 ? ` (${duplicateCount} mükerrer kayıt onayınızla eklendi)` : ''));
+  };
+
+  stickyBlock.querySelector('#undoBtn').onclick = () => {
+    if(!state.lastImportKartPaymentsBackup){ alert('Geri alınacak son yapıştırma kaydı bulunamadı.'); return; }
+    if(confirm('Son yapıştırılan kart verileri listeden kaldırılacak. Onaylıyor musunuz?')){
+      state.kartPayments = JSON.parse(JSON.stringify(state.lastImportKartPaymentsBackup));
+      state.lastImportKartPaymentsBackup = null;
+      sortPaymentsByDate(state.kartPayments);
+      save();
+      render();
+      alert('Son yapıştırma işlemi başarıyla geri alındı!');
+    }
   };
 
   stickyBlock.querySelector('#mkEkleBtn').onclick = () => {
@@ -1193,7 +1290,6 @@ function renderKartlarSayfa(){
     }
     
     sortPaymentsByDate(state.kartPayments); 
-    
     save(); renderList();
     stickyBlock.querySelector('#mkTarih').value = ''; stickyBlock.querySelector('#mkAciklama').value = ''; stickyBlock.querySelector('#mkTutar').value = ''; stickyBlock.querySelector('#mkTaksit').value = '1';
   };
@@ -1285,7 +1381,6 @@ function renderAyarlar(){
     e.target.value = '';
   });
 
-  // YENİ EKLENEN FATURA HAREKETLERİ KISMI
   const faturaSec = el(`<div class="settings-section">
     <h4>Fatura Hareketleri (Excel)</h4>
     <div class="hint" style="margin-bottom:10px;">Tüm fatura ve ödeme hareketlerinizi (Ödeme sayfasındaki veriler) Excel dosyası olarak dışa aktarabilir veya mevcut listenin üzerine toplu olarak Excel'den veri içe aktarabilirsiniz.</div>
@@ -1333,7 +1428,6 @@ function renderAyarlar(){
     e.target.value = '';
   });
 
-  // BİR ÖNCEKİ MESAJDA ONAYLADIĞIN AYLIK ÖZET EXCEL KISMI
   const raporSec = el(`<div class="settings-section">
     <h4>Daire Ödeme Raporu (Aylık Özet)</h4>
     <div class="hint" style="margin-bottom:10px;">Dairelerin hangi ayları ödeyip ödemediğini tek bir Excel dosyasında, aylara göre sütunlara ayrılmış şekilde görebilirsiniz.</div>
