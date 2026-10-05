@@ -188,6 +188,12 @@
   .edit-form-field { margin-bottom: 12px; }
   .edit-form-field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--muted); }
   .edit-form-field input, .edit-form-field select { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  
+  /* Güncel ay/bugün satır vurgulaması için hafif efekt */
+  tr.current-month-target {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
 </style>
 </head>
 <body>
@@ -1365,8 +1371,17 @@ function renderKartlarSayfa(){
       tableWrap.style.display = 'none'; return;
     }
     content.querySelectorAll('.empty').forEach(e => e.remove()); tableWrap.style.display = '';
+    
+    // Güncel Ay Bilgisi (YYYY-MM)
+    const nowKey = nowMonthKey();
+    let targetRowEl = null;
+
     payments.forEach((p, idx) => {
-      const row = el(`<tr data-idx="${idx}">
+      const pFullKey = parseFullDateKey(p.tarih);
+      const pAyKey = pFullKey !== '9999-99-99' ? pFullKey.slice(0, 7) : '';
+      const isCurrentMonth = pAyKey === nowKey;
+
+      const row = el(`<tr data-idx="${idx}" data-date="${pFullKey}">
         <td class="ex-chk"><input type="checkbox" class="pay-chk" data-idx="${idx}"></td>
         <td class="ex-tarih"><input type="text" class="tarih-in" value="${escapeAttr(p.tarih)}"></td>
         <td><input type="text" class="aciklama-in" value="${escapeAttr(p.aciklama)}"></td>
@@ -1375,6 +1390,11 @@ function renderKartlarSayfa(){
         <td class="ex-edit"><button class="editbtn" title="Taksitlendir / Düzenle">✏️</button></td>
         <td class="ex-sil"><button class="delbtn">✕</button></td>
       </tr>`);
+
+      if(isCurrentMonth && !targetRowEl){
+        targetRowEl = row;
+      }
+
       row.querySelector('.tarih-in').addEventListener('change', e => { 
         p.tarih = e.target.value; 
         sortPaymentsByDate(state.kartPayments); 
@@ -1389,6 +1409,29 @@ function renderKartlarSayfa(){
       row.querySelector('.delbtn').addEventListener('click', () => { payments.splice(idx, 1); save(); renderList(); });
       tbody.appendChild(row);
     });
+
+    // Otomatik Güncel Tarihe / Bu Aya Odaklanma
+    setTimeout(() => {
+      let scrollToEl = targetRowEl;
+
+      // Tam bu aya ait hareket yoksa, bugünden küçük olan ilk harcamayı (en yakın geçmişi) bulur
+      if(!scrollToEl && payments.length > 0){
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const allRows = Array.from(tbody.querySelectorAll('tr[data-date]'));
+        scrollToEl = allRows.find(r => r.dataset.date <= todayStr) || allRows[allRows.length - 1];
+      }
+
+      if(scrollToEl){
+        const stickyHeight = stickyBlock.offsetHeight || 180;
+        const elementPosition = scrollToEl.getBoundingClientRect().top + window.pageYOffset;
+        const offsetPosition = elementPosition - stickyHeight - 10;
+
+        window.scrollTo({
+          top: Math.max(0, offsetPosition),
+          behavior: 'smooth'
+        });
+      }
+    }, 100);
   }
   renderList();
 
