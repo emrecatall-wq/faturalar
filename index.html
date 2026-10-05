@@ -580,7 +580,7 @@ function getValForCodes(codes, monthKey){
   return null;
 }
 
-/* TAM DOĞRULANMIŞ VE DÜZELTİLMİŞ KART EKSTRE VE KÜMÜLATİF HESAPLAMA MOTORU */
+/* YENİLENEN KART HESAPLAMA SİSTEMİ (İLERİYE DÖNÜK TOPLAM BORÇ DÜŞÜŞÜ DAHİL) */
 function getKartAylikOzet(kartObj, monthKey){
   if(!kartObj || !kartObj.ad) return null;
   const normKart = normalizeTr(kartObj.ad);
@@ -588,45 +588,49 @@ function getKartAylikOzet(kartObj, monthKey){
   
   let [y, m] = monthKey.split('-').map(Number);
   
-  // Seçili ayın ekstre kesim günü (Örn: 18.10.2026)
+  // Seçili ayın kesim günü (Örn: 18.10.2026)
   const currentCutoffStr = y + '-' + String(m).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
   
-  // Önceki ayın ekstre kesim günü (Örn: 18.09.2026)
+  // Önceki ayın kesim günü (Örn: 18.09.2026)
   let prevM = m - 1; let prevY = y;
   if(prevM === 0){ prevM = 12; prevY--; }
   const prevCutoffStr = prevY + '-' + String(prevM).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
 
   const allKartPayments = state.kartPayments.filter(p => normalizeTr(p.kartAdi||'') === normKart);
 
-  let cariPeriodNet = 0;      // Sadece bu 2 kesim günü arasında yapılan harcama & ödemeler
-  let prevPeriodDevir = 0;    // Geçmişten gelen kapanmamış net borç (varsa)
-  let kartKalanToplamBorc = 0; // Taksitler dahil tüm kart kalan toplam borcu
+  let cariPeriodNet = 0;      // Kesim tarihleri arası harcama & ödemeler
+  let prevPeriodDevir = 0;    // Geçmişten devreden ödenmemiş net borç
+  let kartKalanToplamBorc = 0; // Seçili tarihten sonraki GELECEK tüm taksitler + mevcut borçlar
   let hasActivityInMonth = false;
 
   for(const p of allKartPayments){
     const pDateStr = parseFullDateKey(p.tarih);
     if(!pDateStr || pDateStr === '9999-99-99') continue;
     
-    // 1. TOPLAM TUTAR (KÜMÜLATİF BORÇ): Kart üzerinde kalan taksitler dahil toplam yükümlülük
-    if(pDateStr <= currentCutoffStr){
-      kartKalanToplamBorc += p.tutar;
-    }
-
-    // 2. CARİ DÖNEM HARCAMALARI (Kesim tarihler arası)
+    // 1. CARİ DÖNEM HARCAMASI (İki kesim günü arası)
     if(pDateStr > prevCutoffStr && pDateStr <= currentCutoffStr){
       cariPeriodNet += p.tutar;
       hasActivityInMonth = true;
     }
 
-    // 3. ÖNCEKİ DÖNEM DEVİR KONTROLÜ
+    // 2. ÖNCEKİ DÖNEM KAPANMAMIŞ DEVİR BORÇ
     if(pDateStr <= prevCutoffStr){
       prevPeriodDevir += p.tutar;
     }
+
+    // 3. SEÇİLİ KESİM TARİHİ İTİBARIYLA KARTIN KALAN TOPLAM BORCU (Gelecek taksitler + henüz ödenmemiş tüm borçlar)
+    // Taksit vadesi geldikçe/ay ilerledikçe bu tutar ödemeler nedeniyle aşağı doğru düşer.
+    if(pDateStr > prevCutoffStr){
+      kartKalanToplamBorc += p.tutar;
+    }
   }
 
-  // Eğer geçmiş dönemden kalan borç varsa devret, ödenip kapandıysa/eksi bakiye oluştuysa devir borç yansıtma
+  // Geçmişten gelen borç kapatılmadıysa yeni ekstre borcuna devreder
   let devredenBorc = prevPeriodDevir > 0 ? prevPeriodDevir : 0;
   let ekstreBorcu = cariPeriodNet + devredenBorc;
+
+  // Seçili tarihteki toplam borca devreden borcu da ekleyelim
+  kartKalanToplamBorc += devredenBorc;
 
   ekstreBorcu = Math.round(ekstreBorcu * 100) / 100;
   kartKalanToplamBorc = Math.round(kartKalanToplamBorc * 100) / 100;
@@ -1143,7 +1147,7 @@ function renderAna(){
   }
   digerWrap.addEventListener('click', e => { if(e.target.closest('.grup-cell')) openDigerModal(render); });
 
-  /* KART TABLOSU GÜNCEL KORUNMUŞ RENDER ALANI */
+  /* KART TABLOSU RENDER */
   const kartWrap = el(`<div class="ledger-wrap">
     <table class="ledger kart-ledger">
       <thead>
