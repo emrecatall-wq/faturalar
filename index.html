@@ -189,7 +189,6 @@
   .edit-form-field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--muted); }
   .edit-form-field input, .edit-form-field select { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
   
-  /* Güncel ay/bugün satır vurgulaması için hafif efekt */
   tr.current-month-target {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
@@ -581,6 +580,7 @@ function getValForCodes(codes, monthKey){
   return null;
 }
 
+/* DÜZELTİLEN KART AYLIK EKSTRE VE KÜMÜLATİF HESAPLAMA MOTORU */
 function getKartAylikOzet(kartObj, monthKey){
   if(!kartObj || !kartObj.ad) return null;
   const normKart = normalizeTr(kartObj.ad);
@@ -588,47 +588,40 @@ function getKartAylikOzet(kartObj, monthKey){
   
   let [y, m] = monthKey.split('-').map(Number);
   
-  const seciliDonemKesimTarihi = new Date(y, m - 1, kesimGunu, 23, 59, 59);
-  const ODEME_PENCERESI_GUN = 10;
-  const odemeSonTarihi = new Date(seciliDonemKesimTarihi);
-  odemeSonTarihi.setDate(odemeSonTarihi.getDate() + ODEME_PENCERESI_GUN);
+  // Seçili ayın ekstre kesim tarihi (Örn: 15 Kasım 2026 23:59:59)
+  const currentCutoffStr = y + '-' + String(m).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
+  
+  // Önceki ayın ekstre kesim tarihi (Örn: 15 Ekim 2026 23:59:59)
+  let prevM = m - 1; let prevY = y;
+  if(prevM === 0){ prevM = 12; prevY--; }
+  const prevCutoffStr = prevY + '-' + String(prevM).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
 
   const allKartPayments = state.kartPayments.filter(p => normalizeTr(p.kartAdi||'') === normKart);
 
   let ekstreToplami = 0;   
   let kumulatifToplam = 0; 
-  let hasCurrentPeriodActivity = false;
-  
-  let prevM = m - 1; let prevY = y;
-  if(prevM === 0){ prevM = 12; prevY--; }
-  const prevDateStr = prevY + '-' + String(prevM).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
+  let hasActivityInMonth = false;
 
   for(const p of allKartPayments){
     const pDateStr = parseFullDateKey(p.tarih);
     if(!pDateStr || pDateStr === '9999-99-99') continue;
     
-    const [py, pm, pd] = pDateStr.split('-').map(Number);
-    const islemTarihi = new Date(py, pm - 1, pd, 12, 0, 0); 
-    
-    kumulatifToplam += p.tutar;
-    
-    if (p.tutar > 0) {
-       if(islemTarihi <= seciliDonemKesimTarihi){
-          ekstreToplami += p.tutar;
-          if(pDateStr > prevDateStr) hasCurrentPeriodActivity = true;
-       }
-    } else {
-       if(islemTarihi <= odemeSonTarihi){
-          ekstreToplami += p.tutar;
-          if(pDateStr > prevDateStr) hasCurrentPeriodActivity = true;
-       }
+    // 1. KÜMÜLATİF BORÇ HESABI: Bugüne kadar / Seçili dönemin sonuna kadar kalan toplam yükümlülük
+    if(pDateStr <= currentCutoffStr){
+      kumulatifToplam += p.tutar;
+    }
+
+    // 2. AYLIK EKSTRE HESABI: Sadece iki kesim tarihi arasına (Ekim 15 - Kasım 15) düşen harcamalar
+    if(pDateStr > prevCutoffStr && pDateStr <= currentCutoffStr){
+      ekstreToplami += p.tutar;
+      hasActivityInMonth = true;
     }
   }
 
   ekstreToplami = Math.round(ekstreToplami * 100) / 100;
   kumulatifToplam = Math.round(kumulatifToplam * 100) / 100;
   
-  if(!hasCurrentPeriodActivity && ekstreToplami === 0 && kumulatifToplam === 0 && allKartPayments.length === 0) return null;
+  if(!hasActivityInMonth && ekstreToplami === 0 && kumulatifToplam === 0) return null;
   
   const parts = monthKey.split('-');
   const kisaTarih = String(kesimGunu).padStart(2,'0') + '.' + String(parts[1]).padStart(2,'0') + '.' + parts[0];
@@ -1372,7 +1365,6 @@ function renderKartlarSayfa(){
     }
     content.querySelectorAll('.empty').forEach(e => e.remove()); tableWrap.style.display = '';
     
-    // Güncel Ay Bilgisi (YYYY-MM)
     const nowKey = nowMonthKey();
     let targetRowEl = null;
 
@@ -1410,11 +1402,9 @@ function renderKartlarSayfa(){
       tbody.appendChild(row);
     });
 
-    // Otomatik Güncel Tarihe / Bu Aya Odaklanma
     setTimeout(() => {
       let scrollToEl = targetRowEl;
 
-      // Tam bu aya ait hareket yoksa, bugünden küçük olan ilk harcamayı (en yakın geçmişi) bulur
       if(!scrollToEl && payments.length > 0){
         const todayStr = new Date().toISOString().slice(0, 10);
         const allRows = Array.from(tbody.querySelectorAll('tr[data-date]'));
