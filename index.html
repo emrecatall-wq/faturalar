@@ -144,20 +144,20 @@
   table.excel-table th.ex-tarih, table.excel-table td.ex-tarih{width:68px;}
   table.excel-table th.ex-tutar, table.excel-table td.ex-tutar{width:68px;}
   table.excel-table th.ex-ay, table.excel-table td.ex-ay{width:74px;}
-  table.excel-table th.ex-sil, table.excel-table td.ex-sil{width:24px;}
-  table.excel-table th.ex-taksit, table.excel-table td.ex-taksit{width:36px;}
-  table.excel-table td.ex-taksit input{ text-align:center; padding:6px 1px; font-size:11px; }
+  table.excel-table th.ex-sil, table.excel-table td.ex-sil{width:22px;}
+  table.excel-table th.ex-edit, table.excel-table td.ex-edit{width:24px; text-align:center;}
   table.excel-table th.ex-kart, table.excel-table td.ex-kart{width:78px;}
   table.excel-table td.ex-kart select{ width:100%; border:none; background:transparent; color:var(--text); font-size:10.5px; padding:6px 2px; font-family:inherit; }
   .manual-kart-form{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
   .manual-kart-form input, .manual-kart-form select{ background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px 6px; font-size:11.5px; font-family:inherit; min-width:0; }
-  table.excel-table td input[type=text], table.excel-table td input[type=number]{ width:100%; border:none; background:transparent; color:var(--text); font-size:11.5px; padding:6px 4px; font-family:inherit; }
-  table.excel-table td input[type=text]:focus, table.excel-table td input[type=number]:focus{outline:1.5px solid var(--accent); outline-offset:-1.5px;}
+  table.excel-table td input[type=text]{ width:100%; border:none; background:transparent; color:var(--text); font-size:11.5px; padding:6px 4px; font-family:inherit; }
+  table.excel-table td input[type=text]:focus{outline:1.5px solid var(--accent); outline-offset:-1.5px;}
   table.excel-table td.ex-tutar input{text-align:right;}
   table.excel-table td.ex-ay{font-size:9.5px; color:var(--muted); text-align:center; padding:4px 2px;}
   table.excel-table td.ex-ay-warn{color:var(--c-unpaid); font-weight:600;}
   table.excel-table td.ex-chk input{margin:0;}
-  table.excel-table .delbtn{background:none; border:none; color:var(--muted); font-size:14px; cursor:pointer; padding:5px 0; width:100%;}
+  table.excel-table .delbtn, table.excel-table .editbtn{background:none; border:none; color:var(--muted); font-size:13px; cursor:pointer; padding:5px 0; width:100%;}
+  table.excel-table .editbtn:hover{color:var(--accent);}
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:26px 10px;}
   .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
   .modal-sheet{ background:var(--bg2); width:100%; max-width:640px; border-radius:18px 18px 0 0; padding:16px 16px calc(20px + var(--safe-bottom)) 16px; max-height:82vh; overflow-y:auto; }
@@ -184,6 +184,10 @@
   .settings-section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
   .settings-section h4 { margin: 0 0 8px 0; font-size: 14px; font-weight: 600; }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  
+  .edit-form-field { margin-bottom: 12px; }
+  .edit-form-field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--muted); }
+  .edit-form-field input, .edit-form-field select { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
 </style>
 </head>
 <body>
@@ -939,6 +943,98 @@ function openThemeModal(onChange){
   document.body.appendChild(backdrop);
 }
 
+function openKartItemEditModal(idx, onComplete){
+  const p = state.kartPayments[idx];
+  if(!p) return;
+
+  let baseAciklama = p.aciklama.replace(/\s*\(\d+\/\d+\.\s*taksit\)/gi, '').replace(/\s*\(\d+\/\d+\s*taksit\)/gi, '').trim();
+
+  const backdrop = el(`<div class="modal-backdrop"></div>`);
+  const sheet = el(`<div class="modal-sheet">
+    <button class="modal-close">✕</button>
+    <h3>Harcama Düzenle & Taksitlendir</h3>
+    
+    <div class="edit-form-field">
+      <label>Tarih</label>
+      <input type="text" id="edtTarih" value="${escapeAttr(p.tarih)}">
+    </div>
+    
+    <div class="edit-form-field">
+      <label>Açıklama</label>
+      <input type="text" id="edtAciklama" value="${escapeAttr(baseAciklama)}">
+    </div>
+    
+    <div class="edit-form-field">
+      <label>Tutar (₺)</label>
+      <input type="text" id="edtTutar" value="${p.tutar ? p.tutar.toString().replace('.', ',') : ''}">
+    </div>
+    
+    <div class="edit-form-field">
+      <label>Kart</label>
+      <select id="edtKart">
+        <option value="">—</option>
+        ${state.kartlar.map(k => `<option value="${escapeAttr(k.ad)}" ${k.ad===p.kartAdi ? 'selected' : ''}>${escapeAttr(k.ad)}</option>`).join('')}
+      </select>
+    </div>
+    
+    <div class="edit-form-field">
+      <label>Taksit Sayısı (1 = Taksitsiz Tek Çekim)</label>
+      <input type="number" id="edtTaksit" min="1" max="60" value="1">
+    </div>
+
+    <button class="btn success" id="saveEditBtn" style="width:100%; margin-top:10px;">Kaydet ve Uygula ✓</button>
+  </div>`);
+
+  sheet.querySelector('#saveEditBtn').onclick = () => {
+    const newTarih = sheet.querySelector('#edtTarih').value.trim();
+    const newAciklamaRaw = sheet.querySelector('#edtAciklama').value.trim();
+    const newTutar = parseTutar(sheet.querySelector('#edtTutar').value);
+    const newKart = sheet.querySelector('#edtKart').value;
+    const targetTaksit = parseInt(sheet.querySelector('#edtTaksit').value, 10) || 1;
+
+    if(!newTarih){ alert('Tarih girin.'); return; }
+
+    if(targetTaksit === 1){
+      p.tarih = newTarih;
+      p.aciklama = newAciklamaRaw;
+      p.tutar = newTutar;
+      p.kartAdi = newKart;
+    } else {
+      p.tarih = newTarih;
+      p.aciklama = `${newAciklamaRaw} (1/${targetTaksit}. taksit)`;
+      p.tutar = newTutar;
+      p.kartAdi = newKart;
+
+      const batchId = p._importBatchId || ('taksit_batch_' + Date.now());
+
+      for(let i = 2; i <= targetTaksit; i++){
+        const nextDate = addMonthsToTarih(newTarih, i - 1);
+        const nextAciklama = `${newAciklamaRaw} (${i}/${targetTaksit}. taksit)`;
+        const itemId = 'k_item_' + Math.random().toString(36).substring(2, 9);
+        
+        state.kartPayments.push({
+          _importBatchId: batchId,
+          _itemId: itemId,
+          tarih: nextDate,
+          aciklama: nextAciklama,
+          tutar: newTutar,
+          kartAdi: newKart
+        });
+      }
+    }
+
+    sortPaymentsByDate(state.kartPayments);
+    save();
+    backdrop.remove();
+    if(onComplete) onComplete();
+  };
+
+  backdrop.appendChild(sheet);
+  backdrop.addEventListener('click', e => { if(e.target===backdrop) backdrop.remove(); });
+  sheet.querySelector('.modal-close').onclick = () => backdrop.remove();
+  document.body.appendChild(backdrop);
+}
+
 function renderAna(){
   const wrap = el(`<div>
     <div class="topbar">
@@ -1227,49 +1323,6 @@ function renderOdeme(){
   return wrap;
 }
 
-function handleKartTaksitChange(itemIndex, newTaksitVal){
-  const p = state.kartPayments[itemIndex];
-  if(!p) return;
-  const targetTaksit = parseInt(newTaksitVal, 10);
-  if(isNaN(targetTaksit) || targetTaksit < 1) return;
-
-  let baseAciklama = p.aciklama.replace(/\s*\(\d+\/\d+\.\s*taksit\)/gi, '').replace(/\s*\(\d+\/\d+\s*taksit\)/gi, '').trim();
-  
-  if(targetTaksit === 1){
-    p.aciklama = baseAciklama;
-    p.taksit = 1;
-    save();
-    return;
-  }
-
-  p.aciklama = `${baseAciklama} (1/${targetTaksit}. taksit)`;
-  p.taksit = targetTaksit;
-
-  const baseDate = p.tarih;
-  const baseTutar = p.tutar;
-  const baseKart = p.kartAdi;
-  const batchId = p._importBatchId || ('taksit_batch_' + Date.now());
-
-  for(let i = 2; i <= targetTaksit; i++){
-    const nextDate = addMonthsToTarih(baseDate, i - 1);
-    const nextAciklama = `${baseAciklama} (${i}/${targetTaksit}. taksit)`;
-    const itemId = 'k_item_' + Math.random().toString(36).substring(2, 9);
-    
-    state.kartPayments.push({
-      _importBatchId: batchId,
-      _itemId: itemId,
-      tarih: nextDate,
-      aciklama: nextAciklama,
-      tutar: baseTutar,
-      kartAdi: baseKart,
-      taksit: targetTaksit
-    });
-  }
-
-  sortPaymentsByDate(state.kartPayments);
-  save();
-}
-
 function renderKartlarSayfa(){
   const payments = state.kartPayments;
   const wrap = el(`<div><div class="topbar"><button class="backbtn" id="backBtn">‹ Ana Sayfa</button></div><div class="content"></div></div>`);
@@ -1301,7 +1354,7 @@ function renderKartlarSayfa(){
   </div>`);
   content.appendChild(stickyBlock);
 
-  const tableWrap = el(`<div class="excel-wrap"><table class="excel-table"><thead><tr><th class="ex-chk"></th><th class="ex-tarih">Tarih</th><th>Açıklama</th><th class="ex-tutar">Tutar</th><th class="ex-kart">Kart</th><th class="ex-taksit" title="Taksit Adedi">Tks</th><th class="ex-sil"></th></tr></thead><tbody id="payTbody"></tbody></table></div>`);
+  const tableWrap = el(`<div class="excel-wrap"><table class="excel-table"><thead><tr><th class="ex-chk"></th><th class="ex-tarih">Tarih</th><th>Açıklama</th><th class="ex-tutar">Tutar</th><th class="ex-kart">Kart</th><th class="ex-edit">✏️</th><th class="ex-sil"></th></tr></thead><tbody id="payTbody"></tbody></table></div>`);
   content.appendChild(tableWrap);
   const tbody = tableWrap.querySelector('#payTbody');
 
@@ -1313,19 +1366,13 @@ function renderKartlarSayfa(){
     }
     content.querySelectorAll('.empty').forEach(e => e.remove()); tableWrap.style.display = '';
     payments.forEach((p, idx) => {
-      let currentTaksitVal = p.taksit || 1;
-      if(!p.taksit){
-        const match = String(p.aciklama).match(/\/\s*(\d+)\s*\.?\s*taksit/i);
-        if(match) currentTaksitVal = parseInt(match[1], 10);
-      }
-
       const row = el(`<tr data-idx="${idx}">
         <td class="ex-chk"><input type="checkbox" class="pay-chk" data-idx="${idx}"></td>
         <td class="ex-tarih"><input type="text" class="tarih-in" value="${escapeAttr(p.tarih)}"></td>
         <td><input type="text" class="aciklama-in" value="${escapeAttr(p.aciklama)}"></td>
         <td class="ex-tutar"><input type="text" class="tutar-in" value="${p.tutar ? p.tutar.toString().replace('.', ',') : ''}" style="${p.tutar<0?'color:#4caf50;font-weight:700;':''}"></td>
         <td class="ex-kart"><select class="kart-in"><option value="">—</option>${state.kartlar.map(k => `<option value="${escapeAttr(k.ad)}" ${k.ad===p.kartAdi ? 'selected' : ''}>${escapeAttr(k.ad)}</option>`).join('')}</select></td>
-        <td class="ex-taksit"><input type="number" class="taksit-in" min="1" max="60" value="${currentTaksitVal}"></td>
+        <td class="ex-edit"><button class="editbtn" title="Taksitlendir / Düzenle">✏️</button></td>
         <td class="ex-sil"><button class="delbtn">✕</button></td>
       </tr>`);
       row.querySelector('.tarih-in').addEventListener('change', e => { 
@@ -1336,9 +1383,8 @@ function renderKartlarSayfa(){
       row.querySelector('.aciklama-in').addEventListener('change', e => { p.aciklama = e.target.value; save(); });
       row.querySelector('.tutar-in').addEventListener('change', e => { p.tutar = parseTutar(e.target.value); save(); renderList(); });
       row.querySelector('.kart-in').addEventListener('change', e => { p.kartAdi = e.target.value; save(); });
-      row.querySelector('.taksit-in').addEventListener('change', e => {
-        handleKartTaksitChange(idx, e.target.value);
-        renderList();
+      row.querySelector('.editbtn').addEventListener('click', () => {
+        openKartItemEditModal(idx, renderList);
       });
       row.querySelector('.delbtn').addEventListener('click', () => { payments.splice(idx, 1); save(); renderList(); });
       tbody.appendChild(row);
@@ -1390,7 +1436,7 @@ function renderKartlarSayfa(){
       }
       const itemId = 'k_item_' + Math.random().toString(36).substring(2, 9);
       insertedIds.push(itemId);
-      newItems.push({_importBatchId: batchId, _itemId: itemId, tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar, kartAdi: mappedKart, taksit: 1});
+      newItems.push({_importBatchId: batchId, _itemId: itemId, tarih: r.tarih, aciklama: r.aciklama, tutar: parsedTutar, kartAdi: mappedKart});
     });
 
     if(duplicateCount > 0){
@@ -1433,8 +1479,7 @@ function renderKartlarSayfa(){
         tarih: i===0 ? tarih : addMonthsToTarih(tarih, i), 
         aciklama: taksit > 1 ? `${aciklama} (${i+1}/${taksit}. taksit)` : aciklama, 
         tutar: tutar, 
-        kartAdi,
-        taksit: taksit
+        kartAdi
       });
     }
     
