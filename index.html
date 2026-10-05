@@ -580,7 +580,7 @@ function getValForCodes(codes, monthKey){
   return null;
 }
 
-/* DÜZELTİLEN KART AYLIK EKSTRE VE KÜMÜLATİF HESAPLAMA MOTORU */
+/* TAM DOĞRULANMIŞ VE DÜZELTİLMİŞ KART EKSTRE VE KÜMÜLATİF HESAPLAMA MOTORU */
 function getKartAylikOzet(kartObj, monthKey){
   if(!kartObj || !kartObj.ad) return null;
   const normKart = normalizeTr(kartObj.ad);
@@ -588,48 +588,58 @@ function getKartAylikOzet(kartObj, monthKey){
   
   let [y, m] = monthKey.split('-').map(Number);
   
-  // Seçili ayın ekstre kesim tarihi (Örn: 15 Kasım 2026 23:59:59)
+  // Seçili ayın ekstre kesim günü (Örn: 18.10.2026)
   const currentCutoffStr = y + '-' + String(m).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
   
-  // Önceki ayın ekstre kesim tarihi (Örn: 15 Ekim 2026 23:59:59)
+  // Önceki ayın ekstre kesim günü (Örn: 18.09.2026)
   let prevM = m - 1; let prevY = y;
   if(prevM === 0){ prevM = 12; prevY--; }
   const prevCutoffStr = prevY + '-' + String(prevM).padStart(2,'0') + '-' + String(kesimGunu).padStart(2,'0');
 
   const allKartPayments = state.kartPayments.filter(p => normalizeTr(p.kartAdi||'') === normKart);
 
-  let ekstreToplami = 0;   
-  let kumulatifToplam = 0; 
+  let cariPeriodNet = 0;      // Sadece bu 2 kesim günü arasında yapılan harcama & ödemeler
+  let prevPeriodDevir = 0;    // Geçmişten gelen kapanmamış net borç (varsa)
+  let kartKalanToplamBorc = 0; // Taksitler dahil tüm kart kalan toplam borcu
   let hasActivityInMonth = false;
 
   for(const p of allKartPayments){
     const pDateStr = parseFullDateKey(p.tarih);
     if(!pDateStr || pDateStr === '9999-99-99') continue;
     
-    // 1. KÜMÜLATİF BORÇ HESABI: Bugüne kadar / Seçili dönemin sonuna kadar kalan toplam yükümlülük
+    // 1. TOPLAM TUTAR (KÜMÜLATİF BORÇ): Kart üzerinde kalan taksitler dahil toplam yükümlülük
     if(pDateStr <= currentCutoffStr){
-      kumulatifToplam += p.tutar;
+      kartKalanToplamBorc += p.tutar;
     }
 
-    // 2. AYLIK EKSTRE HESABI: Sadece iki kesim tarihi arasına (Ekim 15 - Kasım 15) düşen harcamalar
+    // 2. CARİ DÖNEM HARCAMALARI (Kesim tarihler arası)
     if(pDateStr > prevCutoffStr && pDateStr <= currentCutoffStr){
-      ekstreToplami += p.tutar;
+      cariPeriodNet += p.tutar;
       hasActivityInMonth = true;
+    }
+
+    // 3. ÖNCEKİ DÖNEM DEVİR KONTROLÜ
+    if(pDateStr <= prevCutoffStr){
+      prevPeriodDevir += p.tutar;
     }
   }
 
-  ekstreToplami = Math.round(ekstreToplami * 100) / 100;
-  kumulatifToplam = Math.round(kumulatifToplam * 100) / 100;
+  // Eğer geçmiş dönemden kalan borç varsa devret, ödenip kapandıysa/eksi bakiye oluştuysa devir borç yansıtma
+  let devredenBorc = prevPeriodDevir > 0 ? prevPeriodDevir : 0;
+  let ekstreBorcu = cariPeriodNet + devredenBorc;
+
+  ekstreBorcu = Math.round(ekstreBorcu * 100) / 100;
+  kartKalanToplamBorc = Math.round(kartKalanToplamBorc * 100) / 100;
   
-  if(!hasActivityInMonth && ekstreToplami === 0 && kumulatifToplam === 0) return null;
+  if(!hasActivityInMonth && ekstreBorcu === 0 && kartKalanToplamBorc === 0) return null;
   
   const parts = monthKey.split('-');
   const kisaTarih = String(kesimGunu).padStart(2,'0') + '.' + String(parts[1]).padStart(2,'0') + '.' + parts[0];
   
   return { 
     tarih: kisaTarih, 
-    ekstreTutar: ekstreToplami, 
-    kumulatifTutar: kumulatifToplam 
+    ekstreTutar: ekstreBorcu, 
+    kartToplamTutar: kartKalanToplamBorc 
   };
 }
 
@@ -1133,6 +1143,7 @@ function renderAna(){
   }
   digerWrap.addEventListener('click', e => { if(e.target.closest('.grup-cell')) openDigerModal(render); });
 
+  /* KART TABLOSU GÜNCEL KORUNMUŞ RENDER ALANI */
   const kartWrap = el(`<div class="ledger-wrap">
     <table class="ledger kart-ledger">
       <thead>
@@ -1140,8 +1151,8 @@ function renderAna(){
           <th style="width:65px;"></th>
           <th class="kart-isim-th">Kart</th>
           <th class="kart-tarih-th">Tarih</th>
-          <th class="kart-ekstre-th">Ekstre</th>
-          <th class="kart-toplam-th">Toplam</th>
+          <th class="kart-ekstre-th">Ekstre Tutarı</th>
+          <th class="kart-toplam-th">Toplam Tutar</th>
           <th class="kart-genel-th" style="text-align:right;">Genel<br>Toplam</th>
         </tr>
       </thead>
@@ -1161,14 +1172,14 @@ function renderAna(){
       const ozet = getKartAylikOzet(k, state.currentMonth);
       if(ozet) {
         genelEkstreToplami += (ozet.ekstreTutar||0);
-        genelKumulatifToplami += (ozet.kumulatifTutar||0);
+        genelKumulatifToplami += (ozet.kartToplamTutar||0);
       }
       return {k, ozet};
     });
     
     kartRows.forEach(({k,ozet}, idx) => {
       const eTutar = ozet ? ozet.ekstreTutar : 0;
-      const kTutar = ozet ? ozet.kumulatifTutar : 0;
+      const kTutar = ozet ? ozet.kartToplamTutar : 0;
       
       const tr = el(`<tr class="k-row">
         ${idx===0 ? `<td class="grup-cell" rowspan="${kartRows.length}">Kartlar<span class="tap-hint">Düzenle</span></td>` : ''}
@@ -1177,9 +1188,9 @@ function renderAna(){
         <td class="kalem-val-cell" style="font-size:11.5px;">${!ozet ? '—' : formatTutar(eTutar)}</td>
         <td class="kalem-val-cell" style="font-size:11.5px;">${!ozet ? '—' : formatTutar(kTutar)}</td>
         ${idx===0 ? `<td class="toplam-cell" rowspan="${kartRows.length}">
-          <div style="font-size:11px; color:var(--muted); margin-bottom:2px;">Ekstre:</div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:2px;">Ekstre:</div>
           <div style="margin-bottom:8px;">${formatTutar(genelEkstreToplami)}</div>
-          <div style="font-size:11px; color:var(--muted); margin-bottom:2px;">Kümülatif:</div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:2px;">Kümülatif:</div>
           <div>${formatTutar(genelKumulatifToplami)}</div>
         </td>` : ''}
       </tr>`);
